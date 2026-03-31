@@ -15,10 +15,10 @@ ffi.cdef[[
 local SETTINGS = {
     MAX_RETRY_DELAY = 5, --The maximum delay, in seconds, applied before an action is abandoned.
 }
+
 local currentPosition = {};
 local isMoving = true;
 local pendingAction;
-local expiration;
 ashita.events.register('packet_out', 'packet_out_cb', function(e)
     -- Only update position when an uninjected packet happens. Check the entire chunk to handle race conditions.
     if (not e.injected) and (ffi.C.memcmp(e.data_raw, e.chunk_data_raw, e.size) == 0) then
@@ -76,6 +76,6 @@ ashita.events.register('packet_out', 'packet_out_cb', function(e)
     if (e.id == 0x37) and (not e.blocked) and isMoving then
         pendingAction = { Id=e.id, Data=struct.unpack('c' .. e.size, e.data, 1):totable(), Time=os.clock() };
         e.blocked = true;
-            print(chat.header('CastDelay') .. chat.message("Blocked action due to movement. Action will be reinjected."));
+        print(chat.header('CastDelay') .. chat.message("Blocked action due to movement. Action will be reinjected."));
     end
 end);
