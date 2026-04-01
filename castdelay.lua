@@ -1,6 +1,6 @@
 addon.name      = 'CastDelay';
 addon.author    = 'Thorny';
-addon.version   = '1.01';
+addon.version   = '1.02';
 addon.desc      = 'Delays casting, item usage, and ranged attacks until the player has stopped moving.';
 addon.link      = 'https://github.com/ThornyFFXI/';
 
@@ -24,7 +24,6 @@ ashita.events.register('packet_out', 'packet_out_cb', function(e)
     if (not e.injected) and (ffi.C.memcmp(e.data_raw, e.chunk_data_raw, e.size) == 0) then
 
         --Read ahead..
-        local incomingAction;
         local offset = 0;
         while (offset < e.chunk_size) do
             local id    = ashita.bits.unpack_be(e.chunk_data_raw, offset, 0, 9);
@@ -40,27 +39,15 @@ ashita.events.register('packet_out', 'packet_out_cb', function(e)
                 currentPosition = {}
             end
 
-            if (id == 0x1A) then
-                incomingAction = struct.unpack('c' .. size, e.chunk_data, offset + 1);
-            end
-
             offset = offset + size;
         end
 
-        if (isMoving == false) then
-            -- If player isn't moving and the chunk already contains a player-created action packet, then toss out pending action.
-            if incomingAction then
-                pendingAction = nil;
-                return;
-
-            -- Otherwise, inject it.
-            elseif pendingAction then
-                if (os.clock() < (pendingAction.Time + SETTINGS.MAX_RETRY_DELAY)) then
-                    AshitaCore:GetPacketManager():AddOutgoingPacket(pendingAction.Id, pendingAction.Data:totable());
-                    print(chat.header('CastDelay') .. chat.message("Action reinjected."));
-                end
-                pendingAction = nil;
+        if (isMoving == false) and (pendingAction) then
+            if (os.clock() < (pendingAction.Time + SETTINGS.MAX_RETRY_DELAY)) then
+                AshitaCore:GetPacketManager():AddOutgoingPacket(pendingAction.Id, pendingAction.Data:totable());
+                print(chat.header('CastDelay') .. chat.message("Action reinjected."));
             end
+            pendingAction = nil;
         end
     end
 
@@ -71,16 +58,31 @@ ashita.events.register('packet_out', 'packet_out_cb', function(e)
         -- Block repeats of the same packet to prevent extra log messages..
         if (pendingAction) and (isMoving) and (e.id == pendingAction.Id) and (packetString == pendingAction.Data) and (os.clock() < pendingAction.Time + SETTINGS.MAX_RETRY_DELAY) then
             e.blocked = true;
+            print('repeat')
             return;
         end
 
         -- Always clear pending action on a new unblocked action..
         pendingAction = nil;
+
+        -- Verify action is either an item use, spell, or ranged attack.
+        if (e.id == 0x37) or (T{0x03, 0x10}:contains(struct.unpack('H', e.data, 0x0A+1))) then
+
+            -- Detect movement based on player position when a packet is injected, because there's no real-time 0x15 to monitor.
+            -- When LAC detects an action packet and reinjects, it will be during the first outgoing packet of a chunk before this addon sees the chunk position.
+            -- Checking if the client matches the last chunk position handles this situation cleanly.
+            -- If the packet is not injected, it will be sent alongside an 0x15 guaranteeing isMoving is already accurate.
+            local currentlyMoving = isMoving;
+            if e.injected then
+                local myIndex = AshitaCore:GetMemoryManager():GetParty():GetMemberTargetIndex(0);
+                local myPositionX = AshitaCore:GetMemoryManager():GetEntity():GetLocalPositionX(myIndex);
+                local myPositionY = AshitaCore:GetMemoryManager():GetEntity():GetLocalPositionY(myIndex);
+                currentlyMoving = (myPositionX ~= currentPosition.X) or (myPositionY ~= currentPosition.Y);
+            end
         
-        if (isMoving) then
-            -- Verify action is either an item use, spell, or ranged attack.
-            if (e.id == 0x37) or (T{0x03, 0x10}:contains(struct.unpack('H', e.data, 0x0A+1))) then
-                pendingAction = { Id=e.id, Data=packetString, Time=os.clock() };
+            -- Block and store packet if it must be reinjected.
+            if (currentlyMoving) then
+                pendingAction = { Id=e.id, Data=packetString, Time=os.clock(), Injected=e.injected };
                 e.blocked = true;
                 print(chat.header('CastDelay') .. chat.message("Blocked action due to movement."));
             end
