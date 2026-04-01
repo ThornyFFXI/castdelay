@@ -1,6 +1,6 @@
 addon.name      = 'CastDelay';
 addon.author    = 'Thorny';
-addon.version   = '1.00';
+addon.version   = '1.01';
 addon.desc      = 'Delays casting, item usage, and ranged attacks until the player has stopped moving.';
 addon.link      = 'https://github.com/ThornyFFXI/';
 
@@ -56,7 +56,7 @@ ashita.events.register('packet_out', 'packet_out_cb', function(e)
             -- Otherwise, inject it.
             elseif pendingAction then
                 if (os.clock() < (pendingAction.Time + SETTINGS.MAX_RETRY_DELAY)) then
-                    AshitaCore:GetPacketManager():AddOutgoingPacket(pendingAction.Id, pendingAction.Data);
+                    AshitaCore:GetPacketManager():AddOutgoingPacket(pendingAction.Id, pendingAction.Data:totable());
                     print(chat.header('CastDelay') .. chat.message("Action reinjected."));
                 end
                 pendingAction = nil;
@@ -64,18 +64,26 @@ ashita.events.register('packet_out', 'packet_out_cb', function(e)
         end
     end
 
-    if (e.id == 0x1A) and (not e.blocked) and isMoving then
-        local actionType = struct.unpack('H', e.data, 0x0A+1);
-        if T{0x03, 0x10}:contains(actionType) then
-            pendingAction = { Id=e.id, Data=struct.unpack('c' .. e.size, e.data, 1):totable(), Time=os.clock() };
-            e.blocked = true;
-            print(chat.header('CastDelay') .. chat.message("Blocked action due to movement. Action will be reinjected."));
-        end
-    end
+    if (T{0x1A, 0x37}:contains(e.id)) and (not e.blocked) then
+        -- Store packet without header so sequence/injections don't break matching..
+        local packetString = '\x00\x00\x00\x00' .. struct.unpack('c' .. e.size-4, e.data, 5);
 
-    if (e.id == 0x37) and (not e.blocked) and isMoving then
-        pendingAction = { Id=e.id, Data=struct.unpack('c' .. e.size, e.data, 1):totable(), Time=os.clock() };
-        e.blocked = true;
-        print(chat.header('CastDelay') .. chat.message("Blocked action due to movement. Action will be reinjected."));
+        -- Block repeats of the same packet to prevent extra log messages..
+        if (pendingAction) and (isMoving) and (e.id == pendingAction.Id) and (packetString == pendingAction.Data) and (os.clock() < pendingAction.Time + SETTINGS.MAX_RETRY_DELAY) then
+            e.blocked = true;
+            return;
+        end
+
+        -- Always clear pending action on a new unblocked action..
+        pendingAction = nil;
+        
+        if (isMoving) then
+            -- Verify action is either an item use, spell, or ranged attack.
+            if (e.id == 0x37) or (T{0x03, 0x10}:contains(struct.unpack('H', e.data, 0x0A+1))) then
+                pendingAction = { Id=e.id, Data=packetString, Time=os.clock() };
+                e.blocked = true;
+                print(chat.header('CastDelay') .. chat.message("Blocked action due to movement."));
+            end
+        end
     end
 end);
