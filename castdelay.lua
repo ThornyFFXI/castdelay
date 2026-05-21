@@ -1,6 +1,6 @@
 addon.name      = 'CastDelay';
 addon.author    = 'Thorny';
-addon.version   = '1.02';
+addon.version   = '1.03';
 addon.desc      = 'Delays casting, item usage, and ranged attacks until the player has stopped moving.';
 addon.link      = 'https://github.com/ThornyFFXI/';
 
@@ -14,6 +14,7 @@ ffi.cdef[[
 -- Tunables
 local SETTINGS = {
     MAX_RETRY_DELAY = 5, --The maximum delay, in seconds, applied before an action is abandoned.
+    LOG_OUTPUT = true, --If enabled, notifications are printed to log.
 }
 
 local currentPosition = {};
@@ -45,7 +46,9 @@ ashita.events.register('packet_out', 'packet_out_cb', function(e)
         if (isMoving == false) and (pendingAction) then
             if (os.clock() < (pendingAction.Time + SETTINGS.MAX_RETRY_DELAY)) then
                 AshitaCore:GetPacketManager():AddOutgoingPacket(pendingAction.Id, pendingAction.Data:totable());
-                print(chat.header('CastDelay') .. chat.message("Action reinjected."));
+                if (SETTINGS.LOG_OUTPUT) then
+                    print(chat.header('CastDelay') .. chat.message("Action reinjected."));
+                end
             end
             pendingAction = nil;
         end
@@ -58,7 +61,6 @@ ashita.events.register('packet_out', 'packet_out_cb', function(e)
         -- Block repeats of the same packet to prevent extra log messages..
         if (pendingAction) and (isMoving) and (e.id == pendingAction.Id) and (packetString == pendingAction.Data) and (os.clock() < pendingAction.Time + SETTINGS.MAX_RETRY_DELAY) then
             e.blocked = true;
-            print('repeat')
             return;
         end
 
@@ -84,7 +86,9 @@ ashita.events.register('packet_out', 'packet_out_cb', function(e)
             if (currentlyMoving) then
                 pendingAction = { Id=e.id, Data=packetString, Time=os.clock(), Injected=e.injected };
                 e.blocked = true;
-                print(chat.header('CastDelay') .. chat.message("Blocked action due to movement."));
+                if SETTINGS.LOG_OUTPUT then
+                    print(chat.header('CastDelay') .. chat.message("Blocked action due to movement."));
+                end
             end
         end
     end
