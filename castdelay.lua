@@ -1,10 +1,14 @@
 addon.name      = 'CastDelay';
 addon.author    = 'Thorny';
-addon.version   = '1.03';
+addon.version   = '1.04';
 addon.desc      = 'Delays casting, item usage, and ranged attacks until the player has stopped moving.';
 addon.link      = 'https://github.com/ThornyFFXI/';
 
 require('common')
+if (ashita.addons_version >= 4.3) then
+    addon.instance:enable_feature(addon_feature.use_packet_chunks);
+end
+
 local chat = require('chat')
 local ffi = require('ffi')
 ffi.cdef[[
